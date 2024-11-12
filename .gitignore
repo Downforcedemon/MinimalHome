@@ -57,4 +57,11 @@ build/
 
 ### VS Code ###
 .vscode/
+<<<<<<< Updated upstream
 >>>>>>> a5e9f05 (feat: Implement User Authentication)
+=======
+
+# If application.properties is already tracked, remove it from git tracking
+git rm --cached src/main/resources/application.properties
+
+>>>>>>> Stashed changes
