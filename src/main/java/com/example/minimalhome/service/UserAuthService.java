@@ -28,6 +28,6 @@ public class UserAuthService {
             throw new IllegalArgumentException("Invalid username or password");
         }
 
-        return jwtUtil.generateToken(user.getUsername());
+        return jwtUtil.generateToken(user);
     }
 }

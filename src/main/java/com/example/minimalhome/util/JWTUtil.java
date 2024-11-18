@@ -1,5 +1,6 @@
 package com.example.minimalhome.util;
 
+import com.example.minimalhome.entity.User;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -12,27 +13,19 @@ import java.util.Date;
 
 @Component
 public class JWTUtil {
-
     private final SecretKey key;
-    private final long expiration;
+    private final long EXPIRATION_TIME = 86400000; // 24 hours in milliseconds
 
-    public JWTUtil(
-            @Value("${jwt.secret}") String secret,
-            @Value("${jwt.expiration}") long expiration) {
-        // Convert the hex-encoded secret string to a byte array
-        byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
-        this.key = Keys.hmacShaKeyFor(keyBytes);
-        this.expiration = expiration;
+    public JWTUtil(@Value("${jwt.secret}") String secret) {
+        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
-    public String generateToken(String username) {
-        Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + expiration);
-
+    public String generateToken(User user) {
         return Jwts.builder()
-                .setSubject(username)
-                .setIssuedAt(now)
-                .setExpiration(expiryDate)
+                .setSubject(user.getUsername())
+                .claim("userId", user.getId())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
                 .signWith(key)
                 .compact();
     }
@@ -55,7 +48,15 @@ public class JWTUtil {
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
-
         return claims.getSubject();
+    }
+
+    public Long getUserIdFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(key)
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+        return Long.valueOf(claims.get("userId").toString());
     }
 }
