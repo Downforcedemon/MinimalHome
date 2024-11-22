@@ -8,6 +8,7 @@ import com.example.minimalhome.repository.ScreenTimeRepository;
 import com.example.minimalhome.repository.ScreenTimeLimitRepository;
 import com.example.minimalhome.repository.ScreenTimeCategoryRepository;
 import com.example.minimalhome.repository.ScreenTimeAppCategoryRepository;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -157,6 +158,12 @@ public class ScreenTimeService {
         log.info("Getting all apps in category: {}", categoryId);
 
         return screenTimeAppCategoryRepository.findAppNamesByCategoryId(categoryId);
+    }
+
+    public List<ScreenTimeLog> getScreenTimeHistory(Long userId, LocalDateTime startDate, LocalDateTime endDate) {
+        log.info("Fetching screen time history for user: {} between {} and {}", userId, startDate, endDate);
+
+        return screenTimeRepository.findByUserIdAndStartTimeBetween(userId, startDate, endDate);
     }
 }
 
