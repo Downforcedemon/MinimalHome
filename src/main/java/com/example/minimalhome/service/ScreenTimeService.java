@@ -8,7 +8,6 @@ import com.example.minimalhome.repository.ScreenTimeRepository;
 import com.example.minimalhome.repository.ScreenTimeLimitRepository;
 import com.example.minimalhome.repository.ScreenTimeCategoryRepository;
 import com.example.minimalhome.repository.ScreenTimeAppCategoryRepository;
-import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,9 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.LocalDate;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -107,24 +104,100 @@ public class ScreenTimeService {
         }
     }
 
-    public Map<String, Long> getDailyScreenTime(Long userId, LocalDate date) {
+    public Map<String, Object> getDailyScreenTime(Long userId, LocalDate date) {
         log.info("Getting daily screen time for user: {} on date: {}", userId, date);
 
         LocalDateTime startOfDay = date.atStartOfDay();
         LocalDateTime endOfDay = date.plusDays(1).atStartOfDay();
 
-
-        return screenTimeRepository.getAppWiseScreenTime(userId, startOfDay, endOfDay)
+        // Get app-wise breakdown
+        Map<String, Long> appBreakdown = screenTimeRepository.getAppWiseScreenTime(userId, startOfDay, endOfDay)
                 .stream()
                 .collect(Collectors.toMap(
                         map -> (String) map.get("appName"),
                         map -> ((Number) map.get("totalDuration")).longValue()
                 ));
+
+        // Calculate total screen time
+        long totalScreenTime = appBreakdown.values().stream().mapToLong(Long::longValue).sum();
+
+        // Get category breakdown
+        Map<String, Long> categoryBreakdown = calculateCategoryBreakdown(appBreakdown);
+
+        // Get most used apps
+        List<Map<String, Object>> mostUsedApps = getMostUsedApps(appBreakdown);
+
+        // Calculate productivity score
+        double productivityScore = calculateProductivityScore(appBreakdown);
+
+        // Get all sessions for the day
+        List<ScreenTimeLog> sessions = getScreenTimeHistory(userId, startOfDay, endOfDay);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("totalScreenTime", totalScreenTime);
+        result.put("appUsageBreakdown", appBreakdown);
+        result.put("categoryBreakdown", categoryBreakdown);
+        result.put("sessions", sessions);
+        result.put("mostUsedApps", mostUsedApps);
+        result.put("productivityScore", productivityScore);
+
+        return result;
+    }
+
+    private Map<String, Long> calculateCategoryBreakdown(Map<String, Long> appBreakdown) {
+        Map<String, Long> categoryBreakdown = new HashMap<>();
+
+        appBreakdown.forEach((appName, duration) -> {
+            screenTimeAppCategoryRepository.findByAppName(appName)
+                    .ifPresent(appCategory -> {
+                        String categoryName = appCategory.getCategory().getName();
+                        categoryBreakdown.merge(categoryName, duration, Long::sum);
+                    });
+        });
+
+        return categoryBreakdown.isEmpty() ? null : categoryBreakdown;
+    }
+
+    private List<Map<String, Object>> getMostUsedApps(Map<String, Long> appBreakdown) {
+        if (appBreakdown.isEmpty()) {
+            return null;
+        }
+
+        return appBreakdown.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(5)
+                .map(entry -> {
+                    Map<String, Object> appStats = new HashMap<>();
+                    appStats.put("appName", entry.getKey());
+                    appStats.put("duration", entry.getValue());
+                    screenTimeAppCategoryRepository.findByAppName(entry.getKey())
+                            .ifPresent(appCategory ->
+                                    appStats.put("category", appCategory.getCategory().getName()));
+                    return appStats;
+                })
+                .collect(Collectors.toList());
+    }
+
+    private double calculateProductivityScore(Map<String, Long> appBreakdown) {
+        long totalTime = appBreakdown.values().stream().mapToLong(Long::valueOf).sum();
+        if (totalTime == 0) return 0.0;
+
+        long productiveTime = appBreakdown.entrySet().stream()
+                .filter(entry -> isProductiveApp(entry.getKey()))
+                .mapToLong(Map.Entry::getValue)
+                .sum();
+
+        return (double) productiveTime / totalTime * 100;
+    }
+
+    private boolean isProductiveApp(String appName) {
+        return screenTimeAppCategoryRepository.findByAppName(appName)
+                .map(appCategory -> appCategory.getCategory().getName().equalsIgnoreCase("Productivity"))
+                .orElse(false);
     }
 
     public Long getTotalScreenTimeForPeriod(Long userId, LocalDateTime startDate, LocalDateTime endDate) {
         log.info("Getting total screen time for user: {} between {} and {}", userId, startDate, endDate);
-
         return screenTimeRepository.getTotalScreenTimeForUserInPeriod(userId, startDate, endDate);
     }
 
@@ -147,25 +220,56 @@ public class ScreenTimeService {
         log.debug("App {} successfully assigned to category {}", appName, categoryId);
     }
 
+    @Transactional
+    public ScreenTimeCategory createCategory(String name, String description) {
+        if (screenTimeCategoryRepository.existsByName(name)) {
+            throw new IllegalArgumentException("Category name already exists");
+        }
+        ScreenTimeCategory category = new ScreenTimeCategory();
+        category.setName(name);
+        category.setDescription(description);
+        return screenTimeCategoryRepository.save(category);
+    }
+
     public Optional<ScreenTimeCategory> getAppCategory(String appName) {
         log.info("Getting category for app: {}", appName);
-
         return screenTimeAppCategoryRepository.findByAppName(appName)
                 .map(ScreenTimeAppCategory::getCategory);
     }
 
     public List<String> getAppsInCategory(Long categoryId) {
         log.info("Getting all apps in category: {}", categoryId);
-
         return screenTimeAppCategoryRepository.findAppNamesByCategoryId(categoryId);
     }
 
     public List<ScreenTimeLog> getScreenTimeHistory(Long userId, LocalDateTime startDate, LocalDateTime endDate) {
         log.info("Fetching screen time history for user: {} between {} and {}", userId, startDate, endDate);
-
         return screenTimeRepository.findByUserIdAndStartTimeBetween(userId, startDate, endDate);
     }
+    @Transactional
+    public ScreenTimeCategory assignAppToCategoryWithResponse(String appName, Long categoryId) {
+        log.info("Assigning app: {} to category: {}", appName, categoryId);
+
+        ScreenTimeCategory category = screenTimeCategoryRepository.findById(categoryId)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found"));
+
+        if (screenTimeAppCategoryRepository.existsByCategoryIdAndAppName(categoryId, appName)) {
+            log.warn("App {} is already assigned to category {}", appName, categoryId);
+            throw new IllegalArgumentException(
+                    String.format("App '%s' is already assigned to '%s' category", appName, category.getName()));
+        }
+
+        ScreenTimeAppCategory appCategory = new ScreenTimeAppCategory();
+        appCategory.setCategory(category);
+        appCategory.setAppName(appName);
+
+        screenTimeAppCategoryRepository.save(appCategory);
+        log.debug("App {} successfully assigned to category {}", appName, categoryId);
+
+        return category;
+    }
 }
+
 
 
 /*

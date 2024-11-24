@@ -9,7 +9,6 @@ import com.example.minimalhome.dto.UsageHistoryRequest;
 import com.example.minimalhome.dto.UsageHistoryResponse;
 import com.example.minimalhome.entity.ScreenTimeLog;
 import com.example.minimalhome.service.ScreenTimeService;
-import com.example.minimalhome.service.ScreenTimeAnalyticsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -22,7 +21,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -34,7 +32,6 @@ import java.util.Map;
 public class ScreenTimeController {
 
     private final ScreenTimeService screenTimeService;
-    private final ScreenTimeAnalyticsService screenTimeAnalyticsService;
 
     @PostMapping("/start")
     @Operation(summary = "Start tracking app usage",
@@ -88,16 +85,79 @@ public class ScreenTimeController {
 
         try {
             List<ScreenTimeLog> activeLogs = screenTimeService.getCurrentActiveSessions(userId);
-
             List<SessionResponse> sessionResponses = activeLogs.stream()
                     .map(SessionResponse::from)
                     .toList();
+            return ResponseEntity.ok(new ActiveSessionsResponse(sessionResponses));
+        } catch (Exception e) {
+            log.error("Error fetching active sessions for user: {}", userId, e);
+            return ResponseEntity.badRequest().build();
+        }
+    }
 
-            ActiveSessionsResponse response = new ActiveSessionsResponse(sessionResponses);
+    @GetMapping("/daily")
+    @Operation(summary = "Get daily usage summary",
+            description = "Retrieves usage summary for a specific date")
+    @ApiResponse(responseCode = "200", description = "Daily summary retrieved successfully")
+    @ApiResponse(responseCode = "400", description = "Invalid parameters")
+    public ResponseEntity<DailyUsageResponse> getDailyUsage(
+            @RequestParam Long userId,
+            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate date) {
+
+        log.info("Fetching daily usage for user: {} on date: {}", userId, date);
+
+        try {
+            Map<String, Object> usageData = screenTimeService.getDailyScreenTime(userId, date);
+
+            DailyUsageResponse response = new DailyUsageResponse();
+            response.setDate(date);
+            response.setTotalScreenTime((Long) usageData.get("totalScreenTime"));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Long> appBreakdown = (Map<String, Long>) usageData.get("appUsageBreakdown");
+            response.setAppUsageBreakdown(appBreakdown);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Long> categoryBreakdown = (Map<String, Long>) usageData.get("categoryBreakdown");
+            response.setCategoryBreakdown(categoryBreakdown);
+
+            @SuppressWarnings("unchecked")
+            List<ScreenTimeLog> sessions = (List<ScreenTimeLog>) usageData.get("sessions");
+            if (sessions != null) {
+                response.setSessions(sessions.stream()
+                        .map(SessionResponse::from)
+                        .toList());
+            }
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> mostUsedApps = (List<Map<String, Object>>) usageData.get("mostUsedApps");
+            response.setMostUsedApps(mostUsedApps);
+
+            response.setProductivityScore((Double) usageData.get("productivityScore"));
 
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("Error fetching active sessions for user: {}", userId, e);
+            log.error("Error fetching daily usage for user: {} on date: {}", userId, date, e);
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @GetMapping("/current")
+    @Operation(summary = "Get current usage status",
+            description = "Retrieves current active sessions and usage statistics")
+    @ApiResponse(responseCode = "200", description = "Current status retrieved successfully")
+    @ApiResponse(responseCode = "400", description = "Invalid user ID")
+    public ResponseEntity<ActiveSessionsResponse> getCurrentUsage(@RequestParam Long userId) {
+        log.info("Fetching current usage status for user: {}", userId);
+
+        try {
+            List<ScreenTimeLog> currentSessions = screenTimeService.getCurrentActiveSessions(userId);
+            List<SessionResponse> sessionResponses = currentSessions.stream()
+                    .map(SessionResponse::from)
+                    .toList();
+            return ResponseEntity.ok(new ActiveSessionsResponse(sessionResponses));
+        } catch (Exception e) {
+            log.error("Error fetching current usage for user: {}", userId, e);
             return ResponseEntity.badRequest().build();
         }
     }
@@ -117,33 +177,16 @@ public class ScreenTimeController {
         log.info("Fetching usage history for user: {} between {} and {}", userId, startDate, endDate);
 
         try {
-            // Create request object from parameters
-            UsageHistoryRequest request = new UsageHistoryRequest(
-                    userId, startDate, endDate, categoryFilter, appNameFilter
-            );
+            Long totalTime = screenTimeService.getTotalScreenTimeForPeriod(userId, startDate, endDate);
 
-            // Get time logs for the period
-            List<ScreenTimeLog> logs = screenTimeService.getScreenTimeHistory(
-                    request.getUserId(),
-                    request.getStartDate(),
-                    request.getEndDate()
-            );
-
-            // Calculate total screen time
-            Long totalTime = screenTimeService.getTotalScreenTimeForPeriod(
-                    userId, startDate, endDate
-            );
-
-            // Get daily summaries
-            List<DailyUsageResponse> dailySummaries = new ArrayList<>();
-            // Fill daily summaries logic here
-
-            // Create response
             UsageHistoryResponse response = new UsageHistoryResponse();
-            response.setPeriod(new UsageHistoryResponse.TimePeriod(startDate, endDate,
-                    (int) startDate.toLocalDate().until(endDate.toLocalDate()).getDays()));
+            response.setPeriod(new UsageHistoryResponse.TimePeriod(
+                    startDate,
+                    endDate,
+                    startDate.toLocalDate().until(endDate.toLocalDate()).getDays()
+            ));
             response.setTotalScreenTime(totalTime);
-            response.setDailySummaries(dailySummaries);
+            response.setDailySummaries(List.of());
 
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
@@ -154,75 +197,7 @@ public class ScreenTimeController {
             return ResponseEntity.badRequest().build();
         }
     }
-
-    @GetMapping("/daily")
-    @Operation(summary = "Get daily usage summary",
-            description = "Retrieves usage summary for a specific date")
-    @ApiResponse(responseCode = "200", description = "Daily summary retrieved successfully")
-    @ApiResponse(responseCode = "400", description = "Invalid parameters")
-    public ResponseEntity<DailyUsageResponse> getDailyUsage(
-            @RequestParam Long userId,
-            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate date) {
-
-        log.info("Fetching daily usage for user: {} on date: {}", userId, date);
-
-        try {
-            // Get daily screen time
-            Map<String, Long> appUsageBreakdown = screenTimeService.getDailyScreenTime(userId, date);
-
-            // Get productivity score
-            Double productivityScore = screenTimeAnalyticsService.calculateProductivityScore(userId, date);
-
-            // Get sessions for the day
-            List<ScreenTimeLog> dailySessions = screenTimeService.getScreenTimeHistory(
-                    userId,
-                    date.atStartOfDay(),
-                    date.plusDays(1).atStartOfDay()
-            );
-
-            // Create response
-            DailyUsageResponse response = new DailyUsageResponse();
-            response.setDate(date);
-            response.setTotalScreenTime(screenTimeService.getTotalScreenTimeForPeriod(
-                    userId, date.atStartOfDay(), date.plusDays(1).atStartOfDay()));
-            response.setAppUsageBreakdown(appUsageBreakdown);
-            response.setSessions(dailySessions.stream()
-                    .map(SessionResponse::from)
-                    .toList());
-            response.setProductivityScore(productivityScore);
-
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("Error fetching daily usage for user: {} on date: {}", userId, date, e);
-            return ResponseEntity.badRequest().build();
-        }
-    }
-
-    @GetMapping("/current")
-    @Operation(summary = "Get current usage status",
-            description = "Retrieves current active sessions and usage statistics")
-    @ApiResponse(responseCode = "200", description = "Current status retrieved successfully")
-    @ApiResponse(responseCode = "400", description = "Invalid user ID")
-    public ResponseEntity<ActiveSessionsResponse> getCurrentUsage(@RequestParam Long userId) {
-        log.info("Fetching current usage status for user: {}", userId);
-
-        try {
-            List<ScreenTimeLog> currentSessions = screenTimeService.getCurrentActiveSessions(userId);
-
-            List<SessionResponse> sessionResponses = currentSessions.stream()
-                    .map(SessionResponse::from)
-                    .toList();
-
-            ActiveSessionsResponse response = new ActiveSessionsResponse(sessionResponses);
-
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("Error fetching current usage for user: {}", userId, e);
-            return ResponseEntity.badRequest().build();
-        }
-    }
 }
-
 
 /*
 1. POST /api/screentime/start --> start tracking app usuage (userId, appName)     --> requires StartSessionRequest DTO

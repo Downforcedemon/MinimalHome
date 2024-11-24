@@ -15,7 +15,9 @@ public interface ScreenTimeAppCategoryRepository extends JpaRepository<ScreenTim
 
     List<ScreenTimeAppCategory> findByCategoryId(Long categoryId);
 
-    Optional<ScreenTimeAppCategory> findByAppName(String appName);
+    @Query("SELECT ac FROM ScreenTimeAppCategory ac LEFT JOIN FETCH ac.category WHERE ac.appName = :appName")
+    Optional<ScreenTimeAppCategory> findByAppName(@Param("appName") String appName);
+
 
     Optional<ScreenTimeAppCategory> findByCategoryIdAndAppName(Long categoryId, String appName);
 

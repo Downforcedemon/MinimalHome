@@ -15,7 +15,7 @@ import java.util.Map;
 @Schema(description = "Response object containing daily app usage statistics")
 public class DailyUsageResponse {
 
-    @Schema(description = "Date for which statistics are shown", example = "2024-11-20")
+    @Schema(description = "Date for which statistics are shown", example = "2024-11-23")
     private LocalDate date;
 
     @Schema(description = "Total screen time in seconds", example = "28800")
@@ -32,7 +32,7 @@ public class DailyUsageResponse {
     @Schema(description = "List of app usage sessions for the day")
     private List<SessionResponse> sessions;
 
-    @Schema(description = "Most used apps for the day")
+    @Schema(description = "Most used apps for the day with their categories")
     private List<Map<String, Object>> mostUsedApps;
 
     @Schema(description = "Productivity score for the day (0-100)", example = "75.5")

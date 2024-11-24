@@ -21,7 +21,7 @@ public interface ScreenTimeCategoryRepository extends JpaRepository<ScreenTimeCa
 
     boolean existsByName(String name);
 
-    @Query("SELECT DISTINCT c FROM ScreenTimeAppCategory  c " +
+    @Query("SELECT DISTINCT c FROM ScreenTimeCategory  c " +
             "INNER JOIN ScreenTimeLimit  l ON l.category = c " +
             "WHERE l.userId = :userId AND l.isEnabled = true")
     List<ScreenTimeCategory> findCategoriesWithActiveLimits(@Param("userId") Long userId);
